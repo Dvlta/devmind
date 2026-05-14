@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from devmind.config import DEFAULT_DB_PATH, IGNORED_DIR_NAMES, SUPPORTED_EXTENSIONS
+from devmind.embeddings.local import DEFAULT_DIMENSION, embed_text, serialize_vector
 from devmind.indexer.chunkers import chunk_text, language_for_path
 from devmind.indexer.metadata import CodeChunk
 
@@ -38,6 +39,14 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
 
 CREATE INDEX IF NOT EXISTS idx_chunks_repo ON chunks(repo);
 CREATE INDEX IF NOT EXISTS idx_chunks_path ON chunks(repo, file_path);
+
+CREATE TABLE IF NOT EXISTS chunk_embeddings (
+    chunk_id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    dimension INTEGER NOT NULL,
+    vector TEXT NOT NULL,
+    FOREIGN KEY(chunk_id) REFERENCES chunks(chunk_id) ON DELETE CASCADE
+);
 """
 
 
@@ -78,6 +87,10 @@ def index_repository(repo_path: Path, db_path: Path = DEFAULT_DB_PATH, repo_name
         )
 
     with connect(db_path) as conn:
+        conn.execute(
+            "DELETE FROM chunk_embeddings WHERE chunk_id IN (SELECT chunk_id FROM chunks WHERE repo = ?)",
+            (repo,),
+        )
         conn.execute(
             "DELETE FROM chunks_fts WHERE chunk_id IN (SELECT chunk_id FROM chunks WHERE repo = ?)",
             (repo,),
@@ -122,6 +135,18 @@ def index_repository(repo_path: Path, db_path: Path = DEFAULT_DB_PATH, repo_name
                     chunk.content,
                 ),
             )
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO chunk_embeddings (chunk_id, provider, dimension, vector)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    chunk.chunk_id,
+                    "local-hash",
+                    DEFAULT_DIMENSION,
+                    serialize_vector(embed_text(embedding_text(chunk))),
+                ),
+            )
 
     return len(chunks)
 
@@ -153,6 +178,33 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             FROM chunks
             """
         )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chunk_embeddings (
+            chunk_id TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            dimension INTEGER NOT NULL,
+            vector TEXT NOT NULL,
+            FOREIGN KEY(chunk_id) REFERENCES chunks(chunk_id) ON DELETE CASCADE
+        )
+        """
+    )
+
+
+def embedding_text(chunk: CodeChunk) -> str:
+    metadata = " ".join(
+        part
+        for part in [
+            chunk.file_path,
+            chunk.language,
+            chunk.symbol_name or "",
+            chunk.symbol_type or "",
+            " ".join(chunk.imports),
+        ]
+        if part
+    )
+    return f"{metadata}\n{chunk.content}"
 
 
 def iter_indexable_files(repo_path: Path):

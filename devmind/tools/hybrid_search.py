@@ -7,6 +7,7 @@ from devmind.config import DEFAULT_DB_PATH
 from devmind.indexer.code_indexer import connect
 from devmind.indexer.metadata import RetrievedChunk
 from devmind.tools.keyword_search import keyword_code_search
+from devmind.tools.semantic_search import semantic_code_search
 
 
 def hybrid_code_search(query: str, repo: str | None = None, k: int = 10, db_path: Path = DEFAULT_DB_PATH) -> list[RetrievedChunk]:
@@ -16,10 +17,16 @@ def hybrid_code_search(query: str, repo: str | None = None, k: int = 10, db_path
 
     candidates: dict[str, RetrievedChunk] = {}
 
+    for hit in semantic_code_search(query, repo=repo, k=max(k * 4, 20), db_path=db_path):
+        score = (0.8 * hit.score) + path_score(hit, terms) + symbol_score(hit, terms)
+        candidates[hit.chunk_id] = replace(hit, score=score, source="hybrid")
+
     for rank, hit in enumerate(keyword_code_search(query, repo=repo, k=max(k * 4, 20), db_path=db_path), start=1):
         rank_score = 1.0 / rank
         score = rank_score + path_score(hit, terms) + symbol_score(hit, terms)
-        candidates[hit.chunk_id] = replace(hit, score=score, source="hybrid")
+        current = candidates.get(hit.chunk_id)
+        if current is None or score > current.score:
+            candidates[hit.chunk_id] = replace(hit, score=score, source="hybrid")
 
     for hit in path_symbol_candidates(terms, repo=repo, k=max(k * 4, 20), db_path=db_path):
         score = 0.25 + path_score(hit, terms) + symbol_score(hit, terms)
@@ -113,4 +120,3 @@ def symbol_score(hit: RetrievedChunk, terms: list[str]) -> float:
         if imports and term in imports:
             score += 0.1
     return score
-

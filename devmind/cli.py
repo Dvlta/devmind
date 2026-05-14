@@ -9,6 +9,7 @@ from devmind.indexer.code_indexer import index_repository
 from devmind.tools.file_inspector import inspect_file
 from devmind.tools.hybrid_search import hybrid_code_search
 from devmind.tools.path_search import path_search
+from devmind.tools.semantic_search import semantic_code_search
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -24,6 +25,12 @@ def main(argv: list[str] | None = None) -> int:
     search_parser.add_argument("query")
     search_parser.add_argument("--repo")
     search_parser.add_argument("-k", type=int, default=5)
+    search_parser.add_argument(
+        "--mode",
+        choices=("hybrid", "semantic"),
+        default="hybrid",
+        help="Retrieval mode to use",
+    )
 
     path_parser = subparsers.add_parser("path", help="Search indexed file paths")
     path_parser.add_argument("pattern")
@@ -49,7 +56,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "search":
-        hits = hybrid_code_search(args.query, repo=args.repo, k=args.k, db_path=db_path)
+        if args.mode == "semantic":
+            hits = semantic_code_search(args.query, repo=args.repo, k=args.k, db_path=db_path)
+        else:
+            hits = hybrid_code_search(args.query, repo=args.repo, k=args.k, db_path=db_path)
         for hit in hits:
             print(f"{hit.file_path}:{hit.start_line}-{hit.end_line} [{hit.source}] score={hit.score:.3f}")
         return 0
