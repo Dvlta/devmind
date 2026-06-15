@@ -59,3 +59,12 @@ SUPPORTED_EXTENSIONS = {
     ".json",
 }
 
+
+def load_environment() -> bool:
+    """Load a local .env file without overriding exported variables."""
+    from dotenv import find_dotenv, load_dotenv
+
+    dotenv_path = find_dotenv(usecwd=True)
+    if not dotenv_path:
+        return False
+    return bool(load_dotenv(dotenv_path=dotenv_path, override=False))

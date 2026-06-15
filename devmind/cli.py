@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
-from devmind.agent.simple_agent import answer_with_citations
-from devmind.config import DEFAULT_DB_PATH
+from devmind.agent.graph import run_agent
+from devmind.config import DEFAULT_DB_PATH, load_environment
 from devmind.indexer.code_indexer import index_repository
 from devmind.tools.file_inspector import inspect_file
 from devmind.tools.hybrid_search import hybrid_code_search
@@ -13,6 +14,7 @@ from devmind.tools.semantic_search import semantic_code_search
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_environment()
     parser = argparse.ArgumentParser(prog="devmind")
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="Path to DevMind SQLite index")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -46,6 +48,18 @@ def main(argv: list[str] | None = None) -> int:
     ask_parser = subparsers.add_parser("ask", help="Answer a question using indexed source citations")
     ask_parser.add_argument("query")
     ask_parser.add_argument("--repo")
+    ask_parser.add_argument("--trace", action="store_true", help="Print LangGraph node trace after the answer")
+    ask_parser.add_argument(
+        "--provider",
+        choices=("deterministic", "openai"),
+        help="Override DEVMIND_LLM_PROVIDER",
+    )
+    ask_parser.add_argument("--model", help="Override DEVMIND_LLM_MODEL")
+    ask_parser.add_argument(
+        "--llm-mode",
+        choices=("fast", "full"),
+        help="Fast uses one model call; full uses model planning and validation",
+    )
 
     args = parser.parse_args(argv)
     db_path = Path(args.db)
@@ -75,7 +89,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "ask":
-        print(answer_with_citations(args.query, repo=args.repo, db_path=db_path))
+        result = run_agent(
+            args.query,
+            repo=args.repo,
+            db_path=db_path,
+            provider=args.provider,
+            model=args.model,
+            llm_mode=args.llm_mode,
+        )
+        print(result["answer"])
+        if args.trace:
+            print()
+            print("Trace:")
+            print(json.dumps(result.get("trace", []), indent=2))
         return 0
 
     parser.error(f"Unknown command: {args.command}")
